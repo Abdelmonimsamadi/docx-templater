@@ -64,9 +64,21 @@ function normalizeDocxText(xmlString: string) {
 }
 
 /**
- * Replace placeholders {tag} in a DOCX with data values, loop arrays, and embed images.
+ * Replace placeholders {tag} in a DOCX with data values, loop arrays, conditionals, tables, and embed images.
  *
- * Image size control options:
+ * Supported features:
+ *
+ * Basic placeholders: {name} - Replaced with data.name
+ *
+ * Loops: {#arrayName}...{/arrayName} - Repeats content for each item in array
+ *
+ * Conditionals:
+ * - {?condition}content{/condition} - Shows content if condition is truthy
+ * - {?condition}if content{:else}else content{/condition} - Shows if/else content based on condition
+ *
+ * Tables: {table:arrayName} - Place in a table row, generates rows for each array item
+ *
+ * Images:
  * - { type: "image", buffer: Buffer.from(...), extension: "jpg" } - Auto-scale to max 6 inches, maintain aspect ratio
  * - { type: "image", buffer: Buffer.from(...), extension: "png", widthInches: 3 } - Set width to 3", auto-calculate height
  * - { type: "image", buffer: Buffer.from(...), extension: "jpg", heightInches: 2 } - Set height to 2", auto-calculate width
@@ -115,6 +127,90 @@ export async function generateDocx(
         .join("");
     }
   );
+
+  // Handle conditional statements: {?condition}...{/condition} and {?condition}...{:else}...{/condition}
+  xmlString = xmlString.replace(
+    /{\?(\w+)}([\s\S]*?)(?:{:else}([\s\S]*?))?{\/\1}/g,
+    (match, key, ifContent, elseContent = "") => {
+      const condition = data[key];
+
+      // Evaluate condition - truthy values render the if content, falsy values render else content
+      if (
+        condition &&
+        condition !== "false" &&
+        condition !== "0" &&
+        condition !== "" &&
+        !(Array.isArray(condition) && condition.length === 0)
+      ) {
+        return ifContent;
+      } else {
+        return elseContent;
+      }
+    }
+  );
+
+  // Handle table generation: {table:arrayName}
+  xmlString = xmlString.replace(/{table:(\w+)}/g, (match, key) => {
+    const arr = data[key];
+    if (!Array.isArray(arr) || arr.length === 0) {
+      console.warn(`Warning: Table data '${key}' not found or empty`);
+      return "";
+    }
+
+    // Find the table row template (should be the current row containing the {table:arrayName} placeholder)
+    // We'll look for the containing <w:tr> element and duplicate it for each array item
+    const tableRowRegex =
+      /(<w:tr[^>]*>)([\s\S]*?{table:\w+}[\s\S]*?)(<\/w:tr>)/;
+    const xmlBeforeTable = xmlString.substring(0, xmlString.indexOf(match));
+    const xmlAfterTable = xmlString.substring(
+      xmlString.indexOf(match) + match.length
+    );
+
+    // Find the table row that contains this placeholder
+    const beforeTableReversed = xmlBeforeTable.split("").reverse().join("");
+    const trStartMatch = beforeTableReversed.match(/>rt:w<([^<]*)/);
+    const trEndMatch = xmlAfterTable.match(/(<\/w:tr>)/);
+
+    if (!trStartMatch || !trEndMatch) {
+      console.warn(
+        `Warning: Could not find table row structure for {table:${key}}`
+      );
+      return match; // Return original if we can't find the table structure
+    }
+
+    // Extract the full table row
+    const trStartIndex = xmlString.lastIndexOf(
+      "<w:tr",
+      xmlString.indexOf(match)
+    );
+    const trEndIndex =
+      xmlString.indexOf("</w:tr>", xmlString.indexOf(match)) + 7;
+    const rowTemplate = xmlString.substring(trStartIndex, trEndIndex);
+
+    // Generate rows for each array item
+    const generatedRows = arr
+      .filter((item) => item != null)
+      .map((item) => {
+        let row = rowTemplate.replace(/{table:\w+}/, ""); // Remove the table placeholder
+
+        // Replace placeholders in this row with item data
+        row = row.replace(/{(\w+)}/g, (_, k) => {
+          const value = item[k];
+          return value != null ? String(value) : "";
+        });
+
+        return row;
+      })
+      .join("");
+
+    // Replace the original row with generated rows in the full XML
+    xmlString =
+      xmlString.substring(0, trStartIndex) +
+      generatedRows +
+      xmlString.substring(trEndIndex);
+
+    return ""; // Return empty since we've already replaced in xmlString
+  });
 
   // Handle simple replacements: {name}
   xmlString = xmlString.replace(/{(\w+)}/g, (_, key) => {
