@@ -1,0 +1,6 @@
+fiche.docx
+node_modules/
+dist/
+.env
+.DS_Store
+output.docx
