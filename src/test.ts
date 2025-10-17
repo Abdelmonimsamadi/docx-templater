@@ -31,6 +31,20 @@ async function test() {
       { name: "John Doe", position: "Developer", salary: "50000" },
       { name: "Jane Smith", position: "Designer", salary: "45000" },
       { name: "Bob Wilson", position: "Manager", salary: "60000" },
+      { name: "Alice Johnson", position: "Senior Developer", salary: "65000" },
+      { name: "Mike Brown", position: "QA Engineer", salary: "48000" },
+      { name: "Sarah Davis", position: "Product Manager", salary: "70000" },
+      { name: "Tom Anderson", position: "DevOps Engineer", salary: "58000" },
+      { name: "Lisa Garcia", position: "UI/UX Designer", salary: "52000" },
+      { name: "David Miller", position: "Backend Developer", salary: "55000" },
+      { name: "Emma Wilson", position: "Data Analyst", salary: "47000" },
+      { name: "Chris Taylor", position: "Technical Lead", salary: "75000" },
+      { name: "Rachel White", position: "Frontend Developer", salary: "53000" },
+      {
+        name: "Kevin Martinez",
+        position: "System Administrator",
+        salary: "51000",
+      },
     ],
 
     // Conditional data

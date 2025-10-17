@@ -92,7 +92,6 @@ export async function generateDocx(
   const doc = await zip.loadAsync(templateBuffer);
 
   const documentXml = await doc.file("word/document.xml")!.async("text");
-  const xmlDoc = new DOMParser().parseFromString(documentXml, "text/xml");
   const serializer = new XMLSerializer();
 
   // First, we need to normalize the text to handle split placeholders
