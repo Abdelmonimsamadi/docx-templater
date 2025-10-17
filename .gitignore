@@ -4,3 +4,6 @@ dist/
 .env
 .DS_Store
 output.docx
+signature.png
+~$fiche.docx
+~$output.docx
