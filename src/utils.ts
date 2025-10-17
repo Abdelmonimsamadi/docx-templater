@@ -150,67 +150,62 @@ export async function generateDocx(
   );
 
   // Handle table generation: {table:arrayName}
-  xmlString = xmlString.replace(/{table:(\w+)}/g, (match, key) => {
+  // Process each table placeholder
+  const tableMatches = Array.from(xmlString.matchAll(/{table:(\w+)}/g));
+
+  for (const tableMatch of tableMatches) {
+    const [fullMatch, key] = tableMatch;
     const arr = data[key];
+
     if (!Array.isArray(arr) || arr.length === 0) {
       console.warn(`Warning: Table data '${key}' not found or empty`);
-      return "";
+      xmlString = xmlString.replace(fullMatch, "");
+      continue;
     }
 
-    // Find the table row template (should be the current row containing the {table:arrayName} placeholder)
-    // We'll look for the containing <w:tr> element and duplicate it for each array item
-    const tableRowRegex =
-      /(<w:tr[^>]*>)([\s\S]*?{table:\w+}[\s\S]*?)(<\/w:tr>)/;
-    const xmlBeforeTable = xmlString.substring(0, xmlString.indexOf(match));
-    const xmlAfterTable = xmlString.substring(
-      xmlString.indexOf(match) + match.length
-    );
+    const matchIndex = tableMatch.index!;
 
-    // Find the table row that contains this placeholder
-    const beforeTableReversed = xmlBeforeTable.split("").reverse().join("");
-    const trStartMatch = beforeTableReversed.match(/>rt:w<([^<]*)/);
-    const trEndMatch = xmlAfterTable.match(/(<\/w:tr>)/);
+    // Find the table row containing this placeholder
+    const trStartIndex = xmlString.lastIndexOf("<w:tr", matchIndex);
+    const trEndIndex = xmlString.indexOf("</w:tr>", matchIndex) + 7;
 
-    if (!trStartMatch || !trEndMatch) {
+    if (trStartIndex === -1 || trEndIndex === 6) {
+      // 6 means indexOf returned -1, +7 = 6
       console.warn(
         `Warning: Could not find table row structure for {table:${key}}`
       );
-      return match; // Return original if we can't find the table structure
+      xmlString = xmlString.replace(fullMatch, "");
+      continue;
     }
 
-    // Extract the full table row
-    const trStartIndex = xmlString.lastIndexOf(
-      "<w:tr",
-      xmlString.indexOf(match)
-    );
-    const trEndIndex =
-      xmlString.indexOf("</w:tr>", xmlString.indexOf(match)) + 7;
+    // Extract the row template
     const rowTemplate = xmlString.substring(trStartIndex, trEndIndex);
 
-    // Generate rows for each array item
-    const generatedRows = arr
+    console.log(`Processing table ${key} with ${arr.length} items`);
+
+    // Generate new rows
+    const newRows = arr
       .filter((item) => item != null)
       .map((item) => {
-        let row = rowTemplate.replace(/{table:\w+}/, ""); // Remove the table placeholder
+        // Start with the template and remove the table placeholder
+        let newRow = rowTemplate.replace(/{table:\w+}/, "");
 
-        // Replace placeholders in this row with item data
-        row = row.replace(/{(\w+)}/g, (_, k) => {
-          const value = item[k];
+        // Replace data placeholders
+        newRow = newRow.replace(/{(\w+)}/g, (_, fieldName) => {
+          const value = item[fieldName];
           return value != null ? String(value) : "";
         });
 
-        return row;
+        return newRow;
       })
       .join("");
 
-    // Replace the original row with generated rows in the full XML
+    // Replace the original row with the new rows
     xmlString =
       xmlString.substring(0, trStartIndex) +
-      generatedRows +
+      newRows +
       xmlString.substring(trEndIndex);
-
-    return ""; // Return empty since we've already replaced in xmlString
-  });
+  }
 
   // Handle simple replacements: {name}
   xmlString = xmlString.replace(/{(\w+)}/g, (_, key) => {
