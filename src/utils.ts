@@ -1,6 +1,13 @@
 import JSZip from "jszip";
 import { DOMParser, XMLSerializer } from "xmldom";
 import sizeOf from "image-size";
+import {
+  TemplateData,
+  ImageData,
+  GenerateDocxOptions,
+  DocxGenerationResult,
+  DocxGenerationError,
+} from "./types";
 
 /**
  * Normalize DOCX text by merging split text runs to handle placeholders properly
@@ -12,7 +19,11 @@ function normalizeDocxText(xmlString: string) {
 
   // Extract all text content and merge it
   let fullText = "";
-  const textElements = [];
+  const textElements: Array<{
+    element: Element;
+    text: string;
+    startIndex: number;
+  }> = [];
 
   for (let i = 0; i < textNodes.length; i++) {
     const textNode = textNodes[i];
@@ -86,7 +97,8 @@ function normalizeDocxText(xmlString: string) {
  */
 export async function generateDocx(
   templateBuffer: Buffer,
-  data: any
+  data: TemplateData,
+  options: GenerateDocxOptions = {}
 ): Promise<Buffer> {
   const zip = new JSZip();
   const doc = await zip.loadAsync(templateBuffer);
@@ -118,8 +130,8 @@ export async function generateDocx(
       return arr
         .filter((item) => item != null) // Filter out null/undefined items
         .map((item) =>
-          inner.replace(/{(\w+)}/g, (_, k) => {
-            const value = item[k];
+          inner.replace(/{(\w+)}/g, (_match: string, k: string) => {
+            const value = (item as any)[k];
             return value != null ? String(value) : "";
           })
         )
@@ -208,8 +220,18 @@ export async function generateDocx(
 
   // Handle simple replacements: {name}
   xmlString = xmlString.replace(/{(\w+)}/g, (_, key) => {
-    if (typeof data[key] === "string") return data[key];
-    if (data[key] && data[key].type === "image") return `__IMAGE__${key}__`;
+    const value = data[key];
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean")
+      return String(value);
+    if (
+      value &&
+      typeof value === "object" &&
+      "type" in value &&
+      value.type === "image"
+    ) {
+      return `__IMAGE__${key}__`;
+    }
     return "";
   });
 
@@ -217,19 +239,33 @@ export async function generateDocx(
   doc.file("word/document.xml", xmlString);
 
   // Embed images if any
-  if (Object.values(data).some((v) => v?.type === "image")) {
+  const hasImages = Object.values(data).some(
+    (v): v is ImageData =>
+      v !== null && typeof v === "object" && "type" in v && v.type === "image"
+  );
+
+  if (hasImages) {
     const relsPath = "word/_rels/document.xml.rels";
     let relsXml = await doc.file(relsPath)!.async("text");
     const relsDoc = new DOMParser().parseFromString(relsXml, "text/xml");
 
     let relIdCounter = 100;
     for (const [key, value] of Object.entries(data)) {
-      if (value?.type !== "image") continue;
+      // Type guard for ImageData
+      if (
+        !value ||
+        typeof value !== "object" ||
+        !("type" in value) ||
+        value.type !== "image"
+      ) {
+        continue;
+      }
 
-      const imgBuffer = value.buffer;
+      const imageData = value as ImageData;
+      const imgBuffer = imageData.buffer;
       const dims = sizeOf(imgBuffer);
 
-      const imgFile = `word/media/${key}.${value.extension}`;
+      const imgFile = `word/media/${key}.${imageData.extension}`;
       doc.file(imgFile, imgBuffer);
 
       // Add to relationships
@@ -240,14 +276,14 @@ export async function generateDocx(
         "Type",
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
       );
-      relElem.setAttribute("Target", `media/${key}.${value.extension}`);
+      relElem.setAttribute("Target", `media/${key}.${imageData.extension}`);
       relsDoc.documentElement.appendChild(relElem);
 
       // Replace image marker
       let docXml = await doc.file("word/document.xml")!.async("text");
       docXml = docXml.replace(
         `__IMAGE__${key}__`,
-        createImageXML(rId, dims, value)
+        createImageXML(rId, dims, imageData)
       );
       doc.file("word/document.xml", docXml);
     }
@@ -285,15 +321,283 @@ export async function generateDocx(
   return outputBuffer as Buffer;
 }
 
+/**
+ * Enhanced version of generateDocx that returns detailed statistics
+ */
+export async function generateDocxDetailed(
+  templateBuffer: Buffer,
+  data: TemplateData,
+  options: GenerateDocxOptions = {}
+): Promise<DocxGenerationResult> {
+  // Track statistics
+  let placeholdersReplaced = 0;
+  let loopsProcessed = 0;
+  let conditionalsProcessed = 0;
+  let tablesGenerated = 0;
+  let imagesEmbedded = 0;
+
+  try {
+    const zip = new JSZip();
+    const doc = await zip.loadAsync(templateBuffer);
+
+    const documentXml = await doc.file("word/document.xml")!.async("text");
+    const serializer = new XMLSerializer();
+
+    // First, we need to normalize the text to handle split placeholders
+    let xmlString = normalizeDocxText(documentXml);
+
+    // Count and handle loops
+    const loopMatches = xmlString.match(/{#(\w+)}([\s\S]*?){\/\1}/g);
+    if (loopMatches) {
+      loopsProcessed = loopMatches.length;
+      if (options.debug) console.log(`Processing ${loopsProcessed} loops`);
+    }
+
+    xmlString = xmlString.replace(
+      /{#(\w+)}([\s\S]*?){\/\1}/g,
+      (match, key, inner) => {
+        const arr = data[key];
+        if (!arr) {
+          if (options.debug)
+            console.warn(`Warning: Array '${key}' not found in data`);
+          return "";
+        }
+        if (!Array.isArray(arr)) {
+          if (options.debug)
+            console.warn(`Warning: '${key}' is not an array, got:`, typeof arr);
+          return "";
+        }
+        if (arr.length === 0) {
+          if (options.debug) console.warn(`Warning: Array '${key}' is empty`);
+          return "";
+        }
+
+        return arr
+          .filter((item) => item != null)
+          .map((item) =>
+            inner.replace(/{(\w+)}/g, (_match: string, k: string) => {
+              const value = (item as any)[k];
+              if (value != null) placeholdersReplaced++;
+              return value != null ? String(value) : "";
+            })
+          )
+          .join("");
+      }
+    );
+
+    // Count and handle conditionals
+    const conditionalMatches = xmlString.match(
+      /{\?(\w+)}([\s\S]*?)(?:{:else}([\s\S]*?))?{\/\1}/g
+    );
+    if (conditionalMatches) {
+      conditionalsProcessed = conditionalMatches.length;
+      if (options.debug)
+        console.log(`Processing ${conditionalsProcessed} conditionals`);
+    }
+
+    xmlString = xmlString.replace(
+      /{\?(\w+)}([\s\S]*?)(?:{:else}([\s\S]*?))?{\/\1}/g,
+      (match, key, ifContent, elseContent = "") => {
+        const condition = data[key];
+        if (
+          condition &&
+          condition !== "false" &&
+          condition !== "0" &&
+          condition !== "" &&
+          !(Array.isArray(condition) && condition.length === 0)
+        ) {
+          return ifContent;
+        } else {
+          return elseContent;
+        }
+      }
+    );
+
+    // Handle tables
+    const tableMatches = Array.from(xmlString.matchAll(/{table:(\w+)}/g));
+    tablesGenerated = tableMatches.length;
+    if (options.debug && tablesGenerated > 0) {
+      console.log(`Processing ${tablesGenerated} tables`);
+    }
+
+    for (const tableMatch of tableMatches) {
+      const [fullMatch, key] = tableMatch;
+      const arr = data[key];
+
+      if (!Array.isArray(arr) || arr.length === 0) {
+        if (options.debug)
+          console.warn(`Warning: Table data '${key}' not found or empty`);
+        xmlString = xmlString.replace(fullMatch, "");
+        continue;
+      }
+
+      const matchIndex = tableMatch.index!;
+      const trStartIndex = xmlString.lastIndexOf("<w:tr", matchIndex);
+      const trEndIndex = xmlString.indexOf("</w:tr>", matchIndex) + 7;
+
+      if (trStartIndex === -1 || trEndIndex === 6) {
+        if (options.debug)
+          console.warn(
+            `Warning: Could not find table row structure for {table:${key}}`
+          );
+        xmlString = xmlString.replace(fullMatch, "");
+        continue;
+      }
+
+      const rowTemplate = xmlString.substring(trStartIndex, trEndIndex);
+      if (options.debug)
+        console.log(`Processing table ${key} with ${arr.length} items`);
+
+      const newRows = arr
+        .filter((item) => item != null)
+        .map((item) => {
+          let newRow = rowTemplate.replace(/{table:\w+}/, "");
+          newRow = newRow.replace(/{(\w+)}/g, (_, fieldName) => {
+            const value = (item as any)[fieldName];
+            if (value != null) placeholdersReplaced++;
+            return value != null ? String(value) : "";
+          });
+          return newRow;
+        })
+        .join("");
+
+      xmlString =
+        xmlString.substring(0, trStartIndex) +
+        newRows +
+        xmlString.substring(trEndIndex);
+    }
+
+    // Count and handle simple replacements
+    xmlString = xmlString.replace(/{(\w+)}/g, (_, key) => {
+      const value = data[key];
+      if (typeof value === "string") {
+        placeholdersReplaced++;
+        return value;
+      }
+      if (typeof value === "number" || typeof value === "boolean") {
+        placeholdersReplaced++;
+        return String(value);
+      }
+      if (
+        value &&
+        typeof value === "object" &&
+        "type" in value &&
+        value.type === "image"
+      ) {
+        return `__IMAGE__${key}__`;
+      }
+      return "";
+    });
+
+    doc.file("word/document.xml", xmlString);
+
+    // Handle images
+    const hasImages = Object.values(data).some(
+      (v): v is ImageData =>
+        v !== null && typeof v === "object" && "type" in v && v.type === "image"
+    );
+
+    if (hasImages) {
+      const relsPath = "word/_rels/document.xml.rels";
+      let relsXml = await doc.file(relsPath)!.async("text");
+      const relsDoc = new DOMParser().parseFromString(relsXml, "text/xml");
+
+      let relIdCounter = 100;
+      for (const [key, value] of Object.entries(data)) {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          !("type" in value) ||
+          value.type !== "image"
+        ) {
+          continue;
+        }
+
+        imagesEmbedded++;
+        const imageData = value as ImageData;
+        const imgBuffer = imageData.buffer;
+        const dims = sizeOf(imgBuffer);
+
+        const imgFile = `word/media/${key}.${imageData.extension}`;
+        doc.file(imgFile, imgBuffer);
+
+        const relElem = relsDoc.createElement("Relationship");
+        const rId = `rId${relIdCounter++}`;
+        relElem.setAttribute("Id", rId);
+        relElem.setAttribute(
+          "Type",
+          "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+        );
+        relElem.setAttribute("Target", `media/${key}.${imageData.extension}`);
+        relsDoc.documentElement.appendChild(relElem);
+
+        let docXml = await doc.file("word/document.xml")!.async("text");
+        docXml = docXml.replace(
+          `__IMAGE__${key}__`,
+          createImageXML(rId, dims, imageData)
+        );
+        doc.file("word/document.xml", docXml);
+      }
+
+      relsXml = serializer.serializeToString(relsDoc);
+      doc.file(relsPath, relsXml);
+
+      const contentTypesPath = "[Content_Types].xml";
+      let contentTypesXml = await doc.file(contentTypesPath)!.async("text");
+      const contentTypesDoc = new DOMParser().parseFromString(
+        contentTypesXml,
+        "text/xml"
+      );
+
+      const imageExtensions = ["jpg", "jpeg", "png", "gif"];
+      imageExtensions.forEach((ext) => {
+        if (!contentTypesXml.includes(`Extension="${ext}"`)) {
+          const defaultElem = contentTypesDoc.createElement("Default");
+          defaultElem.setAttribute("Extension", ext);
+          defaultElem.setAttribute(
+            "ContentType",
+            `image/${ext === "jpg" ? "jpeg" : ext}`
+          );
+          contentTypesDoc.documentElement.appendChild(defaultElem);
+        }
+      });
+
+      contentTypesXml = serializer.serializeToString(contentTypesDoc);
+      doc.file(contentTypesPath, contentTypesXml);
+    }
+
+    const outputBuffer = await doc.generateAsync({ type: "nodebuffer" });
+
+    return {
+      buffer: outputBuffer as Buffer,
+      stats: {
+        placeholdersReplaced,
+        loopsProcessed,
+        conditionalsProcessed,
+        tablesGenerated,
+        imagesEmbedded,
+      },
+    };
+  } catch (error) {
+    throw new DocxGenerationError(
+      `Failed to generate DOCX: ${error instanceof Error ? error.message : String(error)}`,
+      "GENERATION_FAILED",
+      error
+    );
+  }
+}
+
 function createImageXML(
   rId: string,
   dims: any,
-  imageData: { widthInches?: number; heightInches?: number } = {}
+  imageData: Pick<ImageData, "widthInches" | "heightInches"> = {}
 ) {
   // Convert inches to EMUs (914400 EMUs per inch)
   const inchesToEMU = 914400;
 
-  let cx, cy;
+  // Initialize with default values
+  let cx: number = dims.width * 9525; // Convert pixels to EMUs
+  let cy: number = dims.height * 9525;
 
   // If custom width/height specified in inches, use those
   if (imageData.widthInches || imageData.heightInches) {
@@ -306,7 +610,7 @@ function createImageXML(
       const aspectRatio = dims.height / dims.width;
       cx = imageData.widthInches * inchesToEMU;
       cy = cx * aspectRatio;
-    } else {
+    } else if (imageData.heightInches) {
       // Only height specified - maintain aspect ratio
       const aspectRatio = dims.width / dims.height;
       cy = imageData.heightInches * inchesToEMU;
@@ -316,9 +620,6 @@ function createImageXML(
     // No custom size - use original logic with scaling
     const maxWidthTwips = 6 * inchesToEMU; // 6 inches max
     const maxHeightTwips = 6 * inchesToEMU;
-
-    cx = dims.width * 9525; // Convert pixels to EMUs
-    cy = dims.height * 9525;
 
     // Scale down if too large
     if (cx > maxWidthTwips) {
