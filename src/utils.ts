@@ -39,7 +39,11 @@ function normalizeDocxText(xmlString: string) {
   // Find placeholders in the full text
   const placeholderRegex = /{[^}]+}/g;
   let match;
-  const replacements = [];
+  const replacements: Array<{
+    placeholder: string;
+    start: number;
+    end: number;
+  }> = [];
 
   while ((match = placeholderRegex.exec(fullText)) !== null) {
     replacements.push({
@@ -49,22 +53,76 @@ function normalizeDocxText(xmlString: string) {
     });
   }
 
-  // For each placeholder, clear affected text nodes and put the full placeholder in the first one
+  // Create a map of elements to their replacement content
+  const elementReplacements = new Map<Element, string>();
+
+  // Process each element to build its final content
+  textElements.forEach((textEl) => {
+    const elStart = textEl.startIndex;
+    const elEnd = textEl.startIndex + textEl.text.length;
+
+    // Find all placeholders that overlap with this element
+    const overlappingPlaceholders = replacements.filter(
+      (replacement) => elStart < replacement.end && elEnd > replacement.start
+    );
+
+    if (overlappingPlaceholders.length === 0) {
+      // No placeholders affect this element, keep original content
+      return;
+    }
+
+    // Build the content for this element
+    let elementContent = "";
+    let currentPos = elStart;
+
+    // Sort overlapping placeholders by start position
+    overlappingPlaceholders.sort((a, b) => a.start - b.start);
+
+    for (const replacement of overlappingPlaceholders) {
+      // Add any text before this placeholder (within this element's range)
+      const beforeStart = Math.max(currentPos, elStart);
+      const beforeEnd = Math.min(replacement.start, elEnd);
+      if (beforeStart < beforeEnd) {
+        elementContent += fullText.substring(beforeStart, beforeEnd);
+      }
+
+      // Add the placeholder (only if it starts within this element)
+      if (replacement.start >= elStart && replacement.start < elEnd) {
+        elementContent += replacement.placeholder;
+      }
+
+      // Move current position past this placeholder
+      currentPos = Math.max(currentPos, replacement.end);
+    }
+
+    // Add any remaining text after the last placeholder
+    if (currentPos < elEnd) {
+      elementContent += fullText.substring(currentPos, elEnd);
+    }
+
+    // Store the replacement for this element
+    elementReplacements.set(textEl.element, elementContent);
+  });
+
+  // Apply all replacements
+  elementReplacements.forEach((content, element) => {
+    element.textContent = content;
+  });
+
+  // Clear elements that had overlapping placeholders but aren't the primary element
   replacements.forEach((replacement) => {
-    let placeholderSet = false;
+    let primaryElementSet = false;
 
     textElements.forEach((textEl) => {
       const elStart = textEl.startIndex;
       const elEnd = textEl.startIndex + textEl.text.length;
 
-      // If this element overlaps with the placeholder
       if (elStart < replacement.end && elEnd > replacement.start) {
-        if (!placeholderSet) {
-          // Set the complete placeholder in the first overlapping element
-          textEl.element.textContent = replacement.placeholder;
-          placeholderSet = true;
-        } else {
-          // Clear other overlapping elements
+        if (elementReplacements.has(textEl.element) && !primaryElementSet) {
+          // This is the primary element for this placeholder range, keep its content
+          primaryElementSet = true;
+        } else if (!elementReplacements.has(textEl.element)) {
+          // This element was affected but doesn't have replacement content, clear it
           textEl.element.textContent = "";
         }
       }
