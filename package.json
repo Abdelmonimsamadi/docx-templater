@@ -1,5 +1,6 @@
 {
-  "name": "@abdelmonimsamadi/docx-templater",
+  "name": "@monime/docx-templater",
+  "private": false,
   "version": "1.0.0",
   "description": "Advanced DOCX template engine with support for placeholders, loops, conditionals, tables, and images",
   "main": "dist/index.js",
