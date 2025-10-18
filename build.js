@@ -9,12 +9,18 @@ rmSync("dist", { recursive: true, force: true });
 await build({
     entryPoints: ["src/index.ts"],
     bundle: true,
-    format: "esm",         // use "cjs" if you prefer CommonJS
-    platform: "neutral",   // "browser" or "node" depending on your lib
-    target: "es2020",
-    outdir: "dist",
-    sourcemap: true,
-    minify: false
+    format: "esm",
+    platform: "node",
+    outdir: "dist/esm"
+});
+
+await build({
+    entryPoints: ["src/index.ts"],
+    bundle: true,
+    format: "cjs",
+    platform: "node",
+    outdir: "dist/cjs",
+    outExtension: { ".js": ".cjs" },
 });
 
 // 2️⃣ Generate Type Definitions
