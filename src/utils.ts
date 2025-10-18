@@ -1,6 +1,5 @@
 import JSZip from "jszip";
 import { DOMParser, XMLSerializer } from "xmldom";
-import sizeOf from "image-size";
 import {
   TemplateData,
   ImageData,
@@ -8,6 +7,84 @@ import {
   DocxGenerationResult,
   DocxGenerationError,
 } from "./types";
+
+// Cross-platform image size detection
+function getImageSize(buffer: Buffer | Uint8Array): {
+  width: number;
+  height: number;
+} {
+  // Convert to Uint8Array for consistent handling
+  const bytes = buffer instanceof Buffer ? new Uint8Array(buffer) : buffer;
+
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    // PNG format - width and height are at bytes 16-19 and 20-23 (big-endian)
+    const width =
+      (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+    const height =
+      (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+    return { width, height };
+  }
+
+  // JPEG signature: FF D8
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    // JPEG format - scan for SOF markers
+    let i = 2;
+    while (i < bytes.length - 8) {
+      if (bytes[i] === 0xff) {
+        const marker = bytes[i + 1];
+        // SOF0, SOF1, SOF2 markers (Start of Frame)
+        if (marker >= 0xc0 && marker <= 0xc3) {
+          const height = (bytes[i + 5] << 8) | bytes[i + 6];
+          const width = (bytes[i + 7] << 8) | bytes[i + 8];
+          return { width, height };
+        }
+        // Skip to next marker
+        const length = (bytes[i + 2] << 8) | bytes[i + 3];
+        i += length + 2;
+      } else {
+        i++;
+      }
+    }
+  }
+
+  // GIF signature: 47 49 46 38 (GIF8)
+  if (
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38
+  ) {
+    // GIF format - width at bytes 6-7, height at bytes 8-9 (little-endian)
+    const width = bytes[6] | (bytes[7] << 8);
+    const height = bytes[8] | (bytes[9] << 8);
+    return { width, height };
+  }
+
+  // Default fallback if format not recognized
+  return { width: 100, height: 100 };
+}
+
+// Cross-platform buffer handling
+function ensureBuffer(data: Buffer | Uint8Array | ArrayBuffer): Buffer {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) {
+    return data;
+  }
+  if (data instanceof ArrayBuffer) {
+    return typeof Buffer !== "undefined"
+      ? Buffer.from(data)
+      : (new Uint8Array(data) as any);
+  }
+  if (data instanceof Uint8Array) {
+    return typeof Buffer !== "undefined" ? Buffer.from(data) : (data as any);
+  }
+  return data as Buffer;
+}
 
 /**
  * Normalize DOCX text by merging split text runs to handle placeholders properly
@@ -154,12 +231,12 @@ function normalizeDocxText(xmlString: string) {
  * - { type: "image", buffer: Buffer.from(...), extension: "png", widthInches: 4, heightInches: 3 } - Exact 4"x3" (may distort)
  */
 export async function generateDocx(
-  templateBuffer: Buffer,
+  templateBuffer: Buffer | Uint8Array | ArrayBuffer,
   data: TemplateData,
   options: GenerateDocxOptions = {}
-): Promise<Buffer> {
+): Promise<Buffer | Uint8Array> {
   const zip = new JSZip();
-  const doc = await zip.loadAsync(templateBuffer);
+  const doc = await zip.loadAsync(ensureBuffer(templateBuffer));
 
   const documentXml = await doc.file("word/document.xml")!.async("text");
   const serializer = new XMLSerializer();
@@ -320,8 +397,8 @@ export async function generateDocx(
       }
 
       const imageData = value as ImageData;
-      const imgBuffer = imageData.buffer;
-      const dims = sizeOf(imgBuffer);
+      const imgBuffer = ensureBuffer(imageData.buffer);
+      const dims = getImageSize(imgBuffer);
 
       const imgFile = `word/media/${key}.${imageData.extension}`;
       doc.file(imgFile, imgBuffer);
@@ -375,15 +452,23 @@ export async function generateDocx(
     doc.file(contentTypesPath, contentTypesXml);
   }
 
-  const outputBuffer = await doc.generateAsync({ type: "nodebuffer" });
-  return outputBuffer as Buffer;
+  // Generate appropriate buffer type based on environment
+  if (typeof Buffer !== "undefined") {
+    // Node.js environment
+    const outputBuffer = await doc.generateAsync({ type: "nodebuffer" });
+    return outputBuffer as Buffer;
+  } else {
+    // Browser environment
+    const outputBuffer = await doc.generateAsync({ type: "uint8array" });
+    return outputBuffer as Uint8Array;
+  }
 }
 
 /**
  * Enhanced version of generateDocx that returns detailed statistics
  */
 export async function generateDocxDetailed(
-  templateBuffer: Buffer,
+  templateBuffer: Buffer | Uint8Array | ArrayBuffer,
   data: TemplateData,
   options: GenerateDocxOptions = {}
 ): Promise<DocxGenerationResult> {
@@ -396,7 +481,7 @@ export async function generateDocxDetailed(
 
   try {
     const zip = new JSZip();
-    const doc = await zip.loadAsync(templateBuffer);
+    const doc = await zip.loadAsync(ensureBuffer(templateBuffer));
 
     const documentXml = await doc.file("word/document.xml")!.async("text");
     const serializer = new XMLSerializer();
@@ -573,8 +658,8 @@ export async function generateDocxDetailed(
 
         imagesEmbedded++;
         const imageData = value as ImageData;
-        const imgBuffer = imageData.buffer;
-        const dims = sizeOf(imgBuffer);
+        const imgBuffer = ensureBuffer(imageData.buffer);
+        const dims = getImageSize(imgBuffer);
 
         const imgFile = `word/media/${key}.${imageData.extension}`;
         doc.file(imgFile, imgBuffer);
@@ -624,10 +709,22 @@ export async function generateDocxDetailed(
       doc.file(contentTypesPath, contentTypesXml);
     }
 
-    const outputBuffer = await doc.generateAsync({ type: "nodebuffer" });
+    // Generate appropriate buffer type based on environment
+    let outputBuffer: Buffer | Uint8Array;
+    if (typeof Buffer !== "undefined") {
+      // Node.js environment
+      outputBuffer = (await doc.generateAsync({
+        type: "nodebuffer",
+      })) as Buffer;
+    } else {
+      // Browser environment
+      outputBuffer = (await doc.generateAsync({
+        type: "uint8array",
+      })) as Uint8Array;
+    }
 
     return {
-      buffer: outputBuffer as Buffer,
+      buffer: outputBuffer,
       stats: {
         placeholdersReplaced,
         loopsProcessed,

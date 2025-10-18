@@ -1,30 +1,36 @@
 # DOCX Templater
 
-Advanced DOCX template engine with support for placeholders, loops, conditionals, tables, and images. Built with TypeScript and designed for modern Node.js applications.
+🚀 **Cross-Platform DOCX Template Engine** - Works in both **Node.js** and **Browser** environments!
+
+Advanced DOCX template engine with support for placeholders, loops, conditionals, tables, and images. Built with TypeScript for modern applications.
 
 [![npm version](https://badge.fury.io/js/%40abdelmonimsamadi%2Fdocx-templater.svg)](https://badge.fury.io/js/%40abdelmonimsamadi%2Fdocx-templater)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+## ✨ Features
 
+- ✅ **Cross-Platform**: Works in Node.js AND browsers
 - ✅ **Placeholders**: Replace `{name}` with data values
 - ✅ **Loops**: Repeat content with `{#array}...{/array}`
 - ✅ **Conditionals**: Show/hide content with `{?condition}...{/condition}`
 - ✅ **If-Else**: Conditional branching with `{?condition}...{:else}...{/condition}`
 - ✅ **Tables**: Generate table rows with `{table:arrayName}`
-- ✅ **Images**: Embed images with size control
-- ✅ **Buffer-based**: No file system dependencies
+- ✅ **Images**: Embed images with size control (PNG, JPEG, GIF)
+- ✅ **Buffer-flexible**: Accepts Buffer, Uint8Array, or ArrayBuffer
 - ✅ **TypeScript**: Full type safety and intellisense
 - ✅ **Statistics**: Optional detailed processing stats
+- ✅ **Zero File Dependencies**: Works entirely in memory
 
-## Installation
+## 📦 Installation
 
 ```bash
 npm install @abdelmonimsamadi/docx-templater
 ```
 
-## Quick Start
+## 🚀 Quick Start
+
+### Node.js Usage
 
 ```typescript
 import { generateDocx, TemplateData } from "@abdelmonimsamadi/docx-templater";
@@ -52,7 +58,71 @@ const outputBuffer = await generateDocx(templateBuffer, data);
 writeFileSync("output.docx", outputBuffer);
 ```
 
-## Template Syntax
+### Browser Usage
+
+```typescript
+import { generateDocx, TemplateData } from "@abdelmonimsamadi/docx-templater";
+
+// Handle file upload
+const handleFileUpload = async (templateFile: File, imageFile: File) => {
+  // Convert files to appropriate format
+  const templateBuffer = new Uint8Array(await templateFile.arrayBuffer());
+  const imageBuffer = new Uint8Array(await imageFile.arrayBuffer());
+
+  const data: TemplateData = {
+    name: "Browser User",
+    date: new Date().toLocaleDateString(),
+    signature: {
+      type: "image",
+      buffer: imageBuffer, // Works with Uint8Array in browser
+      extension: "png",
+      widthInches: 2,
+    },
+  };
+
+  // Generate DOCX (returns Uint8Array in browser)
+  const outputBuffer = await generateDocx(templateBuffer, data);
+
+  // Download the file
+  const blob = new Blob([outputBuffer], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "generated-document.docx";
+  a.click();
+};
+```
+
+## 🌐 Cross-Platform Compatibility
+
+This library works seamlessly in both Node.js and browser environments:
+
+| Environment | Input Types                           | Output Type  | Image Support     |
+| ----------- | ------------------------------------- | ------------ | ----------------- |
+| **Node.js** | `Buffer`, `Uint8Array`, `ArrayBuffer` | `Buffer`     | ✅ PNG, JPEG, GIF |
+| **Browser** | `Uint8Array`, `ArrayBuffer`           | `Uint8Array` | ✅ PNG, JPEG, GIF |
+
+### Input Flexibility
+
+```typescript
+// All of these work in both environments:
+await generateDocx(buffer, data); // Node.js Buffer
+await generateDocx(uint8Array, data); // Uint8Array (browser-friendly)
+await generateDocx(arrayBuffer, data); // ArrayBuffer (from File API)
+```
+
+### Image Size Detection
+
+Built-in cross-platform image size detection supports:
+
+- **PNG**: Full header parsing
+- **JPEG**: SOF marker detection
+- **GIF**: Header dimensions
+- **Fallback**: 100x100px for unknown formats
+
+## 📝 Template Syntax
 
 ### 1. Basic Placeholders
 

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+
+<body>
+
+    <h1>DOCX Generator</h1>
+
+    <script type="module">
+        import { generateDocx } from './dist/index.mjs';
+
+        async function run() {
+            // Example data
+            const data = {
+                title: "Hello World",
+                image: {
+                    type: "image",
+                    buffer: new Uint8Array([]), // Replace with actual image data
+                    extension: "png",
+                    width: 2,
+                    height: 2
+                }
+            };
+
+            // Load your template (replace with actual loading code)
+            const response = await fetch('template.docx');
+            const templateBuffer = new Uint8Array(await response.arrayBuffer());
+
+            // Generate the DOCX
+            const resultBuffer = await generateDocx(templateBuffer, data);
+
+            // Do something with the resultBuffer (e.g., download or display)
+            console.log('Generated DOCX buffer:', resultBuffer);
+        }
+
+        run();
+    </script>
+</body>
+
+</html>

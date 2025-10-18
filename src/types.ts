@@ -8,8 +8,8 @@
 export interface ImageData {
   /** Specifies this is an image object */
   type: "image";
-  /** Buffer containing the image data */
-  buffer: Buffer;
+  /** Buffer or Uint8Array containing the image data (works in both Node.js and browser) */
+  buffer: Buffer | Uint8Array | ArrayBuffer;
   /** File extension of the image (jpg, png, gif, etc.) */
   extension: string;
   /** Optional width in inches. If only width is specified, height is calculated to maintain aspect ratio */
@@ -52,8 +52,8 @@ export interface GenerateDocxOptions {
  * Result of DOCX generation
  */
 export interface DocxGenerationResult {
-  /** The generated DOCX file as a Buffer */
-  buffer: Buffer;
+  /** The generated DOCX file as a Buffer (Node.js) or Uint8Array (browser) */
+  buffer: Buffer | Uint8Array;
   /** Statistics about the generation process */
   stats?: {
     /** Number of placeholders replaced */
