@@ -232,8 +232,7 @@ function normalizeDocxText(xmlString: string) {
  */
 export async function generateDocx(
   templateBuffer: Buffer | Uint8Array | ArrayBuffer,
-  data: TemplateData,
-  options: GenerateDocxOptions = {}
+  data: TemplateData
 ): Promise<Buffer | Uint8Array> {
   const zip = new JSZip();
   const doc = await zip.loadAsync(ensureBuffer(templateBuffer));

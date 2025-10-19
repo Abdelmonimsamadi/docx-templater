@@ -7,16 +7,17 @@ import {
 import { readFileSync, writeFileSync } from "fs";
 import path from "path";
 
+const __filename = path.basename(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 async function test() {
   // Read template as buffer
   const templateBuffer = readFileSync(
-    path.join(__dirname, "../examples/template.docx")
+    path.join(__dirname, "examples/template.docx")
   );
 
   // Read image as buffer
-  const imageBuffer = readFileSync(
-    path.join(__dirname, "../examples/image.jpg")
-  );
+  const imageBuffer = readFileSync(path.join(__dirname, "examples/image.jpg"));
 
   // Example usage with new buffer-based API including conditionals and tables
   const templateData: TemplateData = {
@@ -53,7 +54,6 @@ async function test() {
       type: "image",
       buffer: imageBuffer,
       extension: "png",
-      widthInches: 3,
     } as ImageData,
   };
 
@@ -61,7 +61,7 @@ async function test() {
   const outputBuffer = await generateDocx(templateBuffer, templateData);
 
   // Write output buffer to file
-  writeFileSync(path.join(__dirname, "../examples/output.docx"), outputBuffer);
+  writeFileSync(path.join(__dirname, "examples/output.docx"), outputBuffer);
   console.log("✅ Generated: output.docx");
 }
 
