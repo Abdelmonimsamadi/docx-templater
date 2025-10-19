@@ -1,14 +1,17 @@
+import { exec } from "child_process";
 import {
   generateDocx,
   generateDocxDetailed,
   TemplateData,
   ImageData,
 } from "./index";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
 
 const __filename = path.basename(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+unlinkSync(path.join(__dirname, "examples/output.docx"));
 
 async function test() {
   // Read template as buffer
@@ -53,7 +56,9 @@ async function test() {
     image: {
       type: "image",
       buffer: imageBuffer,
+      //   url: "https://planetofnames.biz/cdn/shop/products/SimpleDesign.jpg?v=1666923538&width=1946",
       extension: "png",
+      widthInches: 5,
     } as ImageData,
   };
 
@@ -62,7 +67,10 @@ async function test() {
 
   // Write output buffer to file
   writeFileSync(path.join(__dirname, "examples/output.docx"), outputBuffer);
+
   console.log("✅ Generated: output.docx");
+
+  exec("open " + path.join(__dirname, "examples/output.docx"));
 }
 
 test();

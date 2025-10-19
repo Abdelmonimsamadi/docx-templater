@@ -86,6 +86,123 @@ function ensureBuffer(data: Buffer | Uint8Array | ArrayBuffer): Buffer {
   return data as Buffer;
 }
 
+// Cross-platform URL fetching for images
+async function fetchImageFromUrl(url: string): Promise<{
+  buffer: Buffer | Uint8Array;
+  extension: string;
+}> {
+  try {
+    // Extract extension from URL
+    const urlPath = new URL(url).pathname;
+    const extensionMatch = urlPath.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+    let extension = extensionMatch ? extensionMatch[1].toLowerCase() : "";
+
+    // Map common extensions
+    if (extension === "jpeg") extension = "jpg";
+
+    if (typeof window !== "undefined" && typeof fetch !== "undefined") {
+      // Browser environment
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch image: ${response.status} ${response.statusText}`
+        );
+      }
+
+      // Try to get extension from Content-Type if not available from URL
+      if (!extension) {
+        const contentType = response.headers.get("content-type");
+        if (contentType) {
+          if (contentType.includes("jpeg")) extension = "jpg";
+          else if (contentType.includes("png")) extension = "png";
+          else if (contentType.includes("gif")) extension = "gif";
+          else if (contentType.includes("webp")) extension = "webp";
+        }
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = new Uint8Array(arrayBuffer);
+
+      return { buffer, extension: extension || "jpg" };
+    } else {
+      // Node.js environment
+      let fetch: any;
+      try {
+        // Try built-in fetch (Node.js 18+)
+        fetch = globalThis.fetch;
+        if (!fetch) {
+          // Fallback: try to dynamically import node-fetch
+          try {
+            const nodeFetch = await eval('import("node-fetch")');
+            fetch = nodeFetch.default || nodeFetch;
+          } catch {
+            throw new Error("node-fetch not available");
+          }
+        }
+      } catch {
+        throw new Error(
+          "URL fetching requires either Node.js 18+ with built-in fetch or the node-fetch package. " +
+            "Install node-fetch: npm install node-fetch"
+        );
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch image: ${response.status} ${response.statusText}`
+        );
+      }
+
+      // Try to get extension from Content-Type if not available from URL
+      if (!extension) {
+        const contentType = response.headers.get("content-type");
+        if (contentType) {
+          if (contentType.includes("jpeg")) extension = "jpg";
+          else if (contentType.includes("png")) extension = "png";
+          else if (contentType.includes("gif")) extension = "gif";
+          else if (contentType.includes("webp")) extension = "webp";
+        }
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      return { buffer, extension: extension || "jpg" };
+    }
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch image from URL "${url}": ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+// Process ImageData to ensure we have buffer and extension
+async function processImageData(
+  imageData: ImageData,
+  key: string
+): Promise<{
+  buffer: Buffer | Uint8Array;
+  extension: string;
+}> {
+  if (imageData.buffer) {
+    // Buffer provided - use it directly
+    const buffer = ensureBuffer(imageData.buffer);
+    const extension = imageData.extension || "jpg";
+    return { buffer, extension };
+  } else if (imageData.url) {
+    // URL provided - fetch the image
+    const { buffer, extension: fetchedExtension } = await fetchImageFromUrl(
+      imageData.url
+    );
+    const extension = imageData.extension || fetchedExtension;
+    return { buffer, extension };
+  } else {
+    throw new Error(
+      `Image data for "${key}" must have either 'buffer' or 'url' property`
+    );
+  }
+}
+
 /**
  * Normalize DOCX text by merging split text runs to handle placeholders properly
  */
@@ -229,6 +346,9 @@ function normalizeDocxText(xmlString: string) {
  * - { type: "image", buffer: Buffer.from(...), extension: "png", widthInches: 3 } - Set width to 3", auto-calculate height
  * - { type: "image", buffer: Buffer.from(...), extension: "jpg", heightInches: 2 } - Set height to 2", auto-calculate width
  * - { type: "image", buffer: Buffer.from(...), extension: "png", widthInches: 4, heightInches: 3 } - Exact 4"x3" (may distort)
+ * - { type: "image", url: "https://example.com/image.jpg" } - Fetch from URL, auto-detect extension, auto-scale
+ * - { type: "image", url: "https://example.com/image.png", widthInches: 3 } - Fetch from URL, set width to 3"
+ * - { type: "image", url: "https://example.com/image.jpg", extension: "jpg" } - Override auto-detected extension
  */
 export async function generateDocx(
   templateBuffer: Buffer | Uint8Array | ArrayBuffer,
@@ -396,10 +516,13 @@ export async function generateDocx(
       }
 
       const imageData = value as ImageData;
-      const imgBuffer = ensureBuffer(imageData.buffer);
+      const { buffer: imgBuffer, extension } = await processImageData(
+        imageData,
+        key
+      );
       const dims = getImageSize(imgBuffer);
 
-      const imgFile = `word/media/${key}.${imageData.extension}`;
+      const imgFile = `word/media/${key}.${extension}`;
       doc.file(imgFile, imgBuffer);
 
       // Add to relationships
@@ -410,7 +533,7 @@ export async function generateDocx(
         "Type",
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
       );
-      relElem.setAttribute("Target", `media/${key}.${imageData.extension}`);
+      relElem.setAttribute("Target", `media/${key}.${extension}`);
       relsDoc.documentElement.appendChild(relElem);
 
       // Replace image marker
@@ -657,10 +780,13 @@ export async function generateDocxDetailed(
 
         imagesEmbedded++;
         const imageData = value as ImageData;
-        const imgBuffer = ensureBuffer(imageData.buffer);
+        const { buffer: imgBuffer, extension } = await processImageData(
+          imageData,
+          key
+        );
         const dims = getImageSize(imgBuffer);
 
-        const imgFile = `word/media/${key}.${imageData.extension}`;
+        const imgFile = `word/media/${key}.${extension}`;
         doc.file(imgFile, imgBuffer);
 
         const relElem = relsDoc.createElement("Relationship");
@@ -670,7 +796,7 @@ export async function generateDocxDetailed(
           "Type",
           "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
         );
-        relElem.setAttribute("Target", `media/${key}.${imageData.extension}`);
+        relElem.setAttribute("Target", `media/${key}.${extension}`);
         relsDoc.documentElement.appendChild(relElem);
 
         let docXml = await doc.file("word/document.xml")!.async("text");

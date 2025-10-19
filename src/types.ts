@@ -9,9 +9,11 @@ export interface ImageData {
   /** Specifies this is an image object */
   type: "image";
   /** Buffer or Uint8Array containing the image data (works in both Node.js and browser) */
-  buffer: Buffer | Uint8Array | ArrayBuffer;
-  /** File extension of the image (jpg, png, gif, etc.) */
-  extension: string;
+  buffer?: Buffer | Uint8Array | ArrayBuffer;
+  /** URL to fetch the image from (alternative to buffer) */
+  url?: string;
+  /** File extension of the image (jpg, png, gif, etc.) - auto-detected from URL if not provided */
+  extension?: string;
   /** Optional width in inches. If only width is specified, height is calculated to maintain aspect ratio */
   widthInches?: number;
   /** Optional height in inches. If only height is specified, width is calculated to maintain aspect ratio */
